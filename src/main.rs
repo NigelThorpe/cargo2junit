@@ -135,11 +135,11 @@ fn parse<T: BufRead>(
 
     for line in input.lines() {
         let line = line?;
-
-        if line.chars().find(|c| !c.is_whitespace()) != Some('{') {
-            continue;
-        }
-
+        // println!("line_before: '{}'", &line);
+        // if line.chars().find(|c| !c.is_whitespace()) != Some('{') {
+        //     continue;
+        // }
+        println!("line: '{}'", &line);
         // println!("'{}'", &line);
         let e: Event = match serde_json::from_str(&line) {
             Ok(event) => event,
@@ -149,15 +149,37 @@ fn parse<T: BufRead>(
                 match serde_json::from_str(&line) {
                     Ok(event) => event,
                     Err(_) => {
+                        println!("Failed to parse line: '{}'", &line);
+                        // try splitting it at "{" as the logging format is causing issues. This should allow us to parse the rest of the line
+                        // We want the last part of the split as that should be the json for the test.
+                        let line_parts: Vec<&str> = line.split_inclusive("{").collect();
+                        let line_parts_len = line_parts.len();
+                        if line_parts_len > 1 {
+                            println!("line parts: {:?}", &line_parts);
+                            let line = line_parts[line_parts_len - 1];
+                            let line = format!("{{{}", line);
+                            println!("line: '{}'", &line);
+                            match serde_json::from_str(&line) {
+                                Ok(event) => event,
+                                Err(_) => {
+                                    println!("Failed to parse line: '{}'", &line);
+                                    continue;
+                                }
+                            }
+                        } else {
+                            println!("Failed to parse line: '{}'", &line);
+                            continue;
+                        }
+
                         // Assume this line isn't part of the test result output. The test itself may
                         // have printed e.g. a log starting with '{'
-                        continue;
+                        // continue;
                     }
                 }
             }
         };
 
-        // println!("{:?}", e);
+        println!("{:?}", e);
         match &e {
             Event::Suite { event } => match event {
                 SuiteEvent::Started { test_count: _ } => {
@@ -169,6 +191,8 @@ fn parse<T: BufRead>(
                     suite_index += 1;
                 }
                 SuiteEvent::Ok { results: _ } | SuiteEvent::Failed { results: _ } => {
+                    println!("in suite:");
+                    println!("tests: {:#?}", tests);
                     assert_eq!(None, tests.iter().next());
                     r.add_testsuite(
                         current_suite_maybe.expect("Suite complete event found outside of suite!"),
@@ -197,6 +221,9 @@ fn parse<T: BufRead>(
                         assert!(tests.insert(name.clone()));
                     }
                     TestEvent::Ok { name } => {
+                        println!("test {:#?} passed", name);
+                        println!("tests: {:#?}", tests);
+                        println!("line: {:#?}", line);
                         assert!(tests.remove(name));
                         let (name, module_path) = split_name(name);
                         let mut tc = TestCase::success(name, duration);
@@ -268,14 +295,20 @@ fn parse<T: BufRead>(
 
 fn determine_exit_code(report: &Report) -> Result<()> {
     if report.testsuites().is_empty() {
-        Err(Error::new(ErrorKind::NotFound, "No test suite results were found.".to_owned()))
+        Err(Error::new(
+            ErrorKind::NotFound,
+            "No test suite results were found.".to_owned(),
+        ))
     } else if report
         .testsuites()
         .iter()
         .flat_map(|suite| suite.testcases().iter())
         .any(|testcase| testcase.is_error() || testcase.is_failure())
     {
-        Err(Error::new(ErrorKind::Other, "One or more tests failed.".to_owned()))
+        Err(Error::new(
+            ErrorKind::Other,
+            "One or more tests failed.".to_owned(),
+        ))
     } else {
         Ok(())
     }
@@ -308,7 +341,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::SYSTEM_OUT_MAX_LEN;
-    use crate::{parse, determine_exit_code};
+    use crate::{determine_exit_code, parse};
     use junit_report::*;
     use regex::Regex;
     use std::io::*;
