@@ -147,8 +147,8 @@ fn parse<T: BufRead>(
                         // Our logging inserts logs that look like json, but aren't. If we can't parse the line as json
                         // try splitting it at "{" and taking the rightmost section.
                         // We want the last part of the split as cargo llvm-cov returns a new line after each test json.
-                        let test_json = line.clone().rfind("{");
-                        match test_json {
+                        let json_start = line.clone().rfind("{");
+                        match json_start {
                             Some(tmp) => {
                                 let new_line = &line[tmp..];
                                 match serde_json::from_str(&new_line) {
