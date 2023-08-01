@@ -135,12 +135,7 @@ fn parse<T: BufRead>(
 
     for line in input.lines() {
         let line = line?;
-        // println!("line_before: '{}'", &line);
-        // if line.chars().find(|c| !c.is_whitespace()) != Some('{') {
-        //     continue;
-        // }
-        println!("line: '{}'", &line);
-        // println!("'{}'", &line);
+
         let e: Event = match serde_json::from_str(&line) {
             Ok(event) => event,
             Err(_) => {
@@ -149,37 +144,30 @@ fn parse<T: BufRead>(
                 match serde_json::from_str(&line) {
                     Ok(event) => event,
                     Err(_) => {
-                        println!("Failed to parse line: '{}'", &line);
-                        // try splitting it at "{" as the logging format is causing issues. This should allow us to parse the rest of the line
-                        // We want the last part of the split as that should be the json for the test.
-                        let line_parts: Vec<&str> = line.split_inclusive("{").collect();
-                        let line_parts_len = line_parts.len();
-                        if line_parts_len > 1 {
-                            println!("line parts: {:?}", &line_parts);
-                            let line = line_parts[line_parts_len - 1];
-                            let line = format!("{{{}", line);
-                            println!("line: '{}'", &line);
-                            match serde_json::from_str(&line) {
-                                Ok(event) => event,
-                                Err(_) => {
-                                    println!("Failed to parse line: '{}'", &line);
-                                    continue;
+                        // Our logging inserts logs that look like json, but aren't. If we can't parse the line as json
+                        // try splitting it at "{" and taking the rightmost section.
+                        // We want the last part of the split as cargo llvm-cov returns a new line after each test json.
+                        let test_json = line.clone().rfind("{");
+                        match test_json {
+                            Some(tmp) => {
+                                let new_line = &line[tmp..];
+                                match serde_json::from_str(&new_line) {
+                                    Ok(event) => event,
+                                    Err(_) => {
+                                        continue;
+                                    }
                                 }
                             }
-                        } else {
-                            println!("Failed to parse line: '{}'", &line);
-                            continue;
+                            None => {
+                                continue;
+                            }
                         }
-
-                        // Assume this line isn't part of the test result output. The test itself may
-                        // have printed e.g. a log starting with '{'
-                        // continue;
                     }
                 }
             }
         };
 
-        println!("{:?}", e);
+        // println!("{:?}", e);
         match &e {
             Event::Suite { event } => match event {
                 SuiteEvent::Started { test_count: _ } => {
@@ -191,8 +179,6 @@ fn parse<T: BufRead>(
                     suite_index += 1;
                 }
                 SuiteEvent::Ok { results: _ } | SuiteEvent::Failed { results: _ } => {
-                    println!("in suite:");
-                    println!("tests: {:#?}", tests);
                     assert_eq!(None, tests.iter().next());
                     r.add_testsuite(
                         current_suite_maybe.expect("Suite complete event found outside of suite!"),
@@ -221,9 +207,6 @@ fn parse<T: BufRead>(
                         assert!(tests.insert(name.clone()));
                     }
                     TestEvent::Ok { name } => {
-                        println!("test {:#?} passed", name);
-                        println!("tests: {:#?}", tests);
-                        println!("line: {:#?}", line);
                         assert!(tests.remove(name));
                         let (name, module_path) = split_name(name);
                         let mut tc = TestCase::success(name, duration);
