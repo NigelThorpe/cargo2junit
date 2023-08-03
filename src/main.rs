@@ -136,11 +136,6 @@ fn parse<T: BufRead>(
     for line in input.lines() {
         let line = line?;
 
-        if line.chars().find(|c| !c.is_whitespace()) != Some('{') {
-            continue;
-        }
-
-        // println!("'{}'", &line);
         let e: Event = match serde_json::from_str(&line) {
             Ok(event) => event,
             Err(_) => {
@@ -149,9 +144,27 @@ fn parse<T: BufRead>(
                 match serde_json::from_str(&line) {
                     Ok(event) => event,
                     Err(_) => {
-                        // Assume this line isn't part of the test result output. The test itself may
-                        // have printed e.g. a log starting with '{'
-                        continue;
+                        // Temporary internal-only change!! (not intended to merge back to public cargo2junit)
+                        // slog-json as of rust 1.70.0 no longer writes whole lines while locking stdout,
+                        // log lines written by slog-json can be co-mingled with test output lines written by cargo test instead of one-log-per-line.
+                        // The change here is temporary while we get a fix into slog-json.
+                        // Because cargo test writes whole lines at a time, always ending with a newline ("\n"),
+                        // we can split the line on the last "{" as {...} is known to be test output.
+                        let json_start = line.clone().rfind("{");
+                        match json_start {
+                            Some(tmp) => {
+                                let new_line = &line[tmp..];
+                                match serde_json::from_str(&new_line) {
+                                    Ok(event) => event,
+                                    Err(_) => {
+                                        continue;
+                                    }
+                                }
+                            }
+                            None => {
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -268,14 +281,20 @@ fn parse<T: BufRead>(
 
 fn determine_exit_code(report: &Report) -> Result<()> {
     if report.testsuites().is_empty() {
-        Err(Error::new(ErrorKind::NotFound, "No test suite results were found.".to_owned()))
+        Err(Error::new(
+            ErrorKind::NotFound,
+            "No test suite results were found.".to_owned(),
+        ))
     } else if report
         .testsuites()
         .iter()
         .flat_map(|suite| suite.testcases().iter())
         .any(|testcase| testcase.is_error() || testcase.is_failure())
     {
-        Err(Error::new(ErrorKind::Other, "One or more tests failed.".to_owned()))
+        Err(Error::new(
+            ErrorKind::Other,
+            "One or more tests failed.".to_owned(),
+        ))
     } else {
         Ok(())
     }
@@ -308,7 +327,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::SYSTEM_OUT_MAX_LEN;
-    use crate::{parse, determine_exit_code};
+    use crate::{determine_exit_code, parse};
     use junit_report::*;
     use regex::Regex;
     use std::io::*;
