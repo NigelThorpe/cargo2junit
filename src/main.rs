@@ -144,9 +144,12 @@ fn parse<T: BufRead>(
                 match serde_json::from_str(&line) {
                     Ok(event) => event,
                     Err(_) => {
-                        // Our logging inserts logs that look like json, but aren't. If we can't parse the line as json
-                        // try splitting it at "{" and taking the rightmost section.
-                        // We want the last part of the split as cargo llvm-cov returns a new line after each test json.
+                        // Temporary internal-only change!! (not intended to merge back to public cargo2junit)
+                        // slog-json as of rust 1.70.0 no longer writes whole lines while locking stdout,
+                        // log lines written by slog-json can be co-mingled with test output lines written by cargo test instead of one-log-per-line.
+                        // The change here is temporary while we get a fix into slog-json.
+                        // Because cargo test writes whole lines at a time, always ending with a newline ("\n"),
+                        // we can split the line on the last "{" as {...} is known to be test output.
                         let json_start = line.clone().rfind("{");
                         match json_start {
                             Some(tmp) => {
